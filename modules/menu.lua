@@ -510,11 +510,46 @@ end
 function open_input_menu_get()
     mp.commandv('script-message-to', 'console', 'disable')
     local title = parse_title()
+    local history_items = get_search_history()
+
+    local function build_log(select_text)
+        local log = {
+            { text = "【弹幕搜索】", style = "{\\c&H00CCFF&\\b1}" },
+            { text = "提示: 回车进行搜索", style = "{\\c&H999999&}" },
+        }
+        if #history_items > 0 then
+            table.insert(log, { text = "【搜索历史】", style = "{\\c&H00CCFF&\\b1}" })
+            for i, item in ipairs(history_items) do
+                local text = string.format("  [%02d] %s", i, item.keyword)
+                if item.time > 0 then
+                    text = text .. string.format("  [%s]", os.date("%Y/%m/%d %H:%M", item.time))
+                end
+                local style = (tonumber(select_text) == i) and "{\\c&HFFDE7F&\\b1}" or "{\\c&HCCCCCC&}"
+                table.insert(log, { text = text, style = style })
+            end
+            table.insert(log, { text = string.format("提示: 输入【1-%d】可快速重新搜索对应关键词", #history_items), style = "{\\c&H999999&}" })
+        end
+        input.set_log(log)
+    end
+
     input_open({
         prompt = '番剧名称:',
         default_text = title,
         cursor_position = title and #title + 1,
+        opened = function() build_log() end,
+        edited = function(text)
+            text = text:gsub("^%s*(.-)%s*$", "%1")
+            build_log(text ~= "" and text or nil)
+        end,
         submit = function(text)
+            text = text:gsub("^%s*(.-)%s*$", "%1")
+
+            -- 输入历史编号则替换为对应关键词重搜
+            local num = tonumber(text)
+            if num and history_items[num] then
+                text = history_items[num].keyword
+            end
+
             input.terminate()
             mp.commandv("script-message-to", mp.get_script_name(), "search-anime-event", text)
         end
@@ -541,6 +576,18 @@ function open_input_menu_uosc()
         keep_open = true,
         selectable = false,
     }
+
+    -- 追加搜索历史条目，点击直接重新搜索
+    for _, item in ipairs(get_search_history()) do
+        items[#items + 1] = {
+            title = item.keyword,
+            hint = item.time > 0 and os.date("%Y/%m/%d %H:%M", item.time) or nil,
+            icon = "history",
+            value = { "script-message-to", mp.get_script_name(), "search-anime-event", item.keyword },
+            keep_open = false,
+            selectable = true,
+        }
+    end
 
     local menu_props = {
         type = "menu_danmaku",
@@ -1444,6 +1491,7 @@ end)
 
 -- 注册函数给 uosc 按钮使用
 mp.register_script_message("search-anime-event", function(query)
+    record_search_history(query)
     perform_cancel_active_request()
     if uosc_available then
         mp.commandv("script-message-to", "uosc", "close-menu", "menu_danmaku")
